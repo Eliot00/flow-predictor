@@ -3,7 +3,7 @@
 模拟店铺客流预测。
 
 - [x] Linear Regression
-- [ ] MLP
+- [x] MLP
 - [ ] LSTM
 
 ## 特征
@@ -22,7 +22,7 @@
 
 特征系统基本和生成假数据的逻辑吻合了
 
-```
+```plaintext
 passby_visit: MSE=17052.43, R²=0.34
 entering_people: MSE=596.09, R²=0.18
 dwell_people: MSE=256.56, R²=0.25
@@ -34,4 +34,18 @@ passby_visit     53.807875  -0.982862  35.900892  ...    16.206073    -79.192350
 entering_people  11.939922  -1.045672   7.153583  ...     3.342367     -6.026688      21.178417
 dwell_people      8.641613   0.067767   4.182763  ...     1.905367     -3.647974       4.197329
 served_people     3.651417   0.123250   1.830584  ...     0.819806     -1.690770      -2.574629
+```
+
+### MLP
+
+```plaintext
+Epoch 10/50 - Loss: 675.5154
+Epoch 20/50 - Loss: 552.6137
+Epoch 30/50 - Loss: 528.1351
+Epoch 40/50 - Loss: 515.8192
+Epoch 50/50 - Loss: 489.8219
+passby_visit: MSE=1834.18 R2=0.94
+entering_people: MSE=86.15 R2=0.87
+dwell_people: MSE=49.50 R2=0.84
+served_people: MSE=14.42 R2=0.80
 ```
