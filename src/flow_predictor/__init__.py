@@ -1,3 +1,5 @@
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -11,7 +13,7 @@ from sklearn.preprocessing import StandardScaler
 from flow_predictor.fake import fake_all
 from flow_predictor.network import MLP, LSTMModel, train_torch_model
 from flow_predictor.prepare import prepare_data, prepare_lstm_data, scale_targets
-from flow_predictor.utils import set_seed
+from flow_predictor.utils import set_seed, get_weather
 
 app = typer.Typer()
 
@@ -22,9 +24,20 @@ TARGET_COLS = [
     "served_people",
 ]
 
-
 @app.command()
-def cli(
+def prepare():
+    # 临时模拟
+    start_date = datetime(2026, 1, 1)
+    end_date = datetime.now() - timedelta(days=1)
+
+    current = start_date
+    while current <= end_date:
+        get_weather(lon=121.4455, lat=31.2264, date_str=current.strftime("%Y-%m-%d"))
+        time.sleep(1)
+        current += timedelta(days=1)
+    
+@app.command()
+def train(
     data_file: Annotated[
         Path | None, typer.Option(help="Real data file path")
     ] = None,
