@@ -7,7 +7,6 @@ def fake_all():
     start_date = '2016-01-01'
     end_date = pd.date_range(start=start_date, periods=36500, freq='D')[-1]
     dates = pd.date_range(start=start_date, end=end_date, freq='D')
-    n_days = len(dates)
     
     # 生成5家店铺，店铺属性信息是固定的
     n_stores = 5
