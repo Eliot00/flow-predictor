@@ -4,7 +4,7 @@
 
 - [x] Linear Regression
 - [x] MLP
-- [ ] LSTM
+- [x] LSTM
 
 ## 特征
 
@@ -48,4 +48,18 @@ passby_visit: MSE=1834.18 R2=0.94
 entering_people: MSE=86.15 R2=0.87
 dwell_people: MSE=49.50 R2=0.84
 served_people: MSE=14.42 R2=0.80
+```
+
+### LSTM
+
+```plaintext
+Epoch 10/50 - Loss: 4548.6006
+Epoch 20/50 - Loss: 3013.7742
+Epoch 30/50 - Loss: 2910.1829
+Epoch 40/50 - Loss: 2852.9103
+Epoch 50/50 - Loss: 2772.9515
+passby_visit: MSE=11451.92 R2=0.66
+entering_people: MSE=302.34 R2=0.77
+dwell_people: MSE=144.54 R2=0.74
+served_people: MSE=33.84 R2=0.69
 ```
