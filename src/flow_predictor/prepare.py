@@ -4,11 +4,24 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 
 def prepare_data(
-    df: pd.DataFrame, target_cols: list[str]
+    df: pd.DataFrame, target_cols: list[str], lag_days: list[int] | None = None
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str]]:
     df = df.copy()
     sort_cols = ["date"] + (["sid"] if "sid" in df.columns else [])
     df = df.sort_values(sort_cols).reset_index(drop=True)
+
+    # MLP是没有利用时序信息的
+    # 试验下，拿之前的targets充当现在的特征，也就是滞后特征
+    if lag_days:
+        for target in target_cols:
+            for lag in lag_days:
+                if "sid" in df.columns:
+                    df[f"{target}_lag_{lag}"] = df.groupby('sid')[target].shift(lag)
+                else:
+                    df[f"{target}_lag_{lag}"] = df[target].shift(lag)
+        # 前几行因为lag产生的nan删掉
+        df = df.dropna()
+    
     df["weekday"] = df["date"].dt.weekday
     df["month"] = df["date"].dt.month
     df["day_of_year"] = df["date"].dt.dayofyear
@@ -18,7 +31,7 @@ def prepare_data(
     df["weather_code"] = le_weather.fit_transform(df["weather"])
     df["category_code"] = le_category.fit_transform(df["category"])
 
-    features = [
+    base_features = [
         "area",
         "longitude",
         "latitude",
@@ -30,6 +43,12 @@ def prepare_data(
         "weather_code",
         "category_code",
     ]
+    if lag_days:
+        lag_features = [f"{t}_lag_{lag}" for t in target_cols for lag in lag_days]
+        features = base_features + lag_features
+    else:
+        features = base_features
+        
     X = df[features]
     y = df[target_cols]
 
@@ -51,6 +70,8 @@ def prepare_data(
         "month",
         "day_of_year",
     ]
+    if lag_days:
+        num_cols += [f"{t}_lag_{lag}" for t in target_cols for lag in lag_days]
 
     scaler = StandardScaler()
     X_train_scaled = X_train.copy()

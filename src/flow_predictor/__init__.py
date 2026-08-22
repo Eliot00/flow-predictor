@@ -43,6 +43,9 @@ def cli(
     lr: Annotated[
         float, typer.Option(help="Learning rate (for MLP/LSTM)")
     ] = 0.001,
+    lag: Annotated[
+        str | None, typer.Option(help="Comma-separated lag days, e.g. '1,7'")
+    ] = None,
 ):
     set_seed()
     if data_file is not None:
@@ -75,8 +78,9 @@ def cli(
         print("\n系数矩阵（行=目标，列=特征）:")
         print(coef_df)
     elif model == "mlp":
+        lag_days = [int(x.strip()) for x in lag.split(",")] if lag else None
         X_train_scaled, X_test_scaled, y_train, y_test, _ = prepare_data(
-            df, TARGET_COLS
+            df, TARGET_COLS, lag_days
         )
         y_train_scaled, y_test_scaled, target_scaler = scale_targets(y_train, y_test)
         X_train_t = torch.tensor(X_train_scaled.values, dtype=torch.float32)
