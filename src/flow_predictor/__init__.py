@@ -1,32 +1,38 @@
-from flow_predictor.network import MLP, LSTMModel
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-from flow_predictor.prepare import prepare_data, prepare_lstm_data
-from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import LabelEncoder, StandardScaler
 from typing import Annotated
+
 import pandas as pd
+import torch
 import typer
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+
 from flow_predictor.fake import fake_all
+from flow_predictor.network import MLP, LSTMModel, train_torch_model
+from flow_predictor.prepare import prepare_data, prepare_lstm_data
+from flow_predictor.utils import set_seed
 
 app = typer.Typer()
+
 
 @app.command()
 def cli(
     fake: Annotated[bool, typer.Option(help="Generate fake data.")] = False,
     train: Annotated[bool, typer.Option(help="Start training.")] = False,
-    model: Annotated[str, typer.Option(help="Model type: 'linear' or 'mlp'")] = "linear",
+    model: Annotated[
+        str, typer.Option(help="Model type: 'linear', 'mlp' or 'lstm'")
+    ] = "linear",
 ):
+    set_seed()
+
     if fake:
         df = fake_all()
         print(f"Fake data: {df.describe()}")
     if train:
         df = fake_all()
 
-        X_train_scaled, X_test_scaled, y_train, y_test, features = prepare_data(df, ["passby_visit", "entering_people", "dwell_people", "served_people"])
+        X_train_scaled, X_test_scaled, y_train, y_test, features = prepare_data(
+            df, ["passby_visit", "entering_people", "dwell_people", "served_people"]
+        )
 
         if model == "linear":
             model_ = LinearRegression()
@@ -40,9 +46,7 @@ def cli(
                 print(f"{col}: MSE={mse:.2f}, R²={r2:.2f}")
 
             coef_df = pd.DataFrame(
-                model_.coef_,
-                index=y_train.columns,
-                columns=features
+                model_.coef_, index=y_train.columns, columns=features
             )
             print("\n系数矩阵（行=目标，列=特征）:")
             print(coef_df)
@@ -56,39 +60,16 @@ def cli(
             output_dim = y_train_t.shape[1]
 
             net = MLP(input_dim, output_dim)
-            criterion = nn.MSELoss()
-            optimizer = optim.Adam(net.parameters(), lr=0.001)
-            batch_size = 256
-            dataset = TensorDataset(X_train_t, y_train_t)
-            loader = DataLoader(dataset, batch_size, shuffle=True)
-
-            epochs = 50
-            for epoch in range(epochs):
-                net.train()
-                total_loss = 0.0
-                for X_batch, y_batch in loader:
-                    optimizer.zero_grad()
-                    pred = net(X_batch)
-                    loss = criterion(pred, y_batch)
-                    loss.backward()
-                    optimizer.step()
-                    total_loss += loss.item()
-                if (epoch + 1) % 10 == 0:
-                    print(f"Epoch {epoch+1}/{epochs} - Loss: {total_loss / len(loader):.4f}")
-
-            net.eval()
-            with torch.no_grad():
-                y_pred_t = net(X_test_t)
-                y_pred_np = y_pred_t.numpy()
-                y_test_np = y_test_t.numpy()
-
-                for i, col in enumerate(y_train.columns):
-                    mse = mean_squared_error(y_test_np[:, i], y_pred_np[:, i])
-                    r2 = r2_score(y_test_np[:, i], y_pred_np[:, i])
-                    print(f"{col}: MSE={mse:.2f} R2={r2:.2f}")
+            train_torch_model(net, X_train_t, y_train_t, X_test_t, y_test_t)
         elif model == "lstm":
             X_train, y_train, X_test, y_test = prepare_lstm_data(
-                df, target_cols=["passby_visit", "entering_people", "dwell_people", "served_people"]
+                df,
+                target_cols=[
+                    "passby_visit",
+                    "entering_people",
+                    "dwell_people",
+                    "served_people",
+                ],
             )
             X_train_t = torch.tensor(X_train, dtype=torch.float32)
             y_train_t = torch.tensor(y_train, dtype=torch.float32)
@@ -97,41 +78,13 @@ def cli(
 
             input_size = X_train.shape[2]
             output_size = y_train.shape[1]
-            net = LSTMModel(input_size, hidden_size=128, num_layers=2, output_size=output_size)
-            criterion = nn.MSELoss()
-            optimizer = optim.Adam(net.parameters(), lr=0.001)
-            batch_size = 256
-            dataset = TensorDataset(X_train_t, y_train_t)
-            loader = DataLoader(dataset, batch_size, shuffle=True)
-
-            epochs = 50
-            for epoch in range(epochs):
-                net.train()
-                total_loss = 0.0
-                for X_batch, y_batch in loader:
-                    optimizer.zero_grad()
-                    pred = net(X_batch)
-                    loss = criterion(pred, y_batch)
-                    loss.backward()
-                    optimizer.step()
-                    total_loss += loss.item()
-
-                if (epoch + 1) % 10 == 0:
-                    avg_loss = total_loss / len(loader)
-                    print(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f}")
-
-            net.eval()
-            with torch.no_grad():
-                y_pred_t = net(X_test_t)
-                y_pred_np = y_pred_t.numpy()
-                y_test_np = y_test_t.numpy()
-                for i, col in enumerate(["passby_visit", "entering_people", "dwell_people", "served_people"]):
-                    mse = mean_squared_error(y_test_np[:, i], y_pred_np[:, i])
-                    r2 = r2_score(y_test_np[:, i], y_pred_np[:, i])
-                    print(f"{col}: MSE={mse:.2f} R2={r2:.2f}")
-
+            net = LSTMModel(
+                input_size, hidden_size=128, num_layers=2, output_size=output_size
+            )
+            train_torch_model(net, X_train_t, y_train_t, X_test_t, y_test_t)
         else:
             typer.echo("Unknown model.")
+
 
 def main() -> None:
     app()
