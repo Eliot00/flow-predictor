@@ -31,6 +31,18 @@ def cli(
     model: Annotated[
         str, typer.Option(help="Model type: 'linear', 'mlp' or 'lstm'")
     ] = "linear",
+    epochs: Annotated[
+        int, typer.Option(help="Number of training epochs (for MLP/LSTM)")
+    ] = 50,
+    batch_size: Annotated[
+        int, typer.Option(help="Batch size for training (for MLP/LSTM)")
+    ] = 32,
+    hidden_size: Annotated[
+        int, typer.Option(help="Hidden layer size for MLP / LSTM hidden units")
+    ] = 64,
+    lr: Annotated[
+        float, typer.Option(help="Learning rate (for MLP/LSTM)")
+    ] = 0.001,
 ):
     set_seed()
     if data_file is not None:
@@ -75,13 +87,16 @@ def cli(
         input_dim = X_train_t.shape[1]
         output_dim = y_train_t.shape[1]
 
-        net = MLP(input_dim, output_dim)
+        net = MLP(input_dim, output_dim, hidden_size=hidden_size)
         train_torch_model(
             net,
             X_train_t,
             y_train_t,
             X_test_t,
             y_test_t,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
             target_scaler=target_scaler,
             target_names=TARGET_COLS,
         )
@@ -96,7 +111,7 @@ def cli(
         input_size = X_train.shape[2]
         output_size = y_train_scaled.shape[1]
         net = LSTMModel(
-            input_size, hidden_size=64, num_layers=2, output_size=output_size
+            input_size, hidden_size=hidden_size, num_layers=2, output_size=output_size
         )
         train_torch_model(
             net,
@@ -104,6 +119,9 @@ def cli(
             y_train_t,
             X_test_t,
             y_test_t,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
             target_scaler=target_scaler,
             target_names=TARGET_COLS,
         )

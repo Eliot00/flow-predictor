@@ -8,12 +8,13 @@ from torch.utils.data import DataLoader, TensorDataset
 
 
 class MLP(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int):
+    def __init__(self, input_dim: int, output_dim: int, hidden_size: int = 64):
         super().__init__()
+        h2 = max(1, hidden_size // 2)
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 64),
+            nn.Linear(input_dim, hidden_size),
             nn.ReLU(),
-            nn.Linear(64, 32),
+            nn.Linear(64, h2),
             nn.ReLU(),
             nn.Linear(32, output_dim),
         )
