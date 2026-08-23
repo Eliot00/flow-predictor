@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import Annotated
 
 import pandas as pd
+import numpy as np
 import torch
 import typer
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 from flow_predictor.fake import fake_all
 from flow_predictor.network import MLP, LSTMModel, train_torch_model
@@ -138,7 +139,7 @@ def train(
             }, save_path)
             typer.echo(f"Model saved to {save_path}")
     elif model == "lstm":
-        X_train, y_train, X_test, y_test, scaler = prepare_lstm_data(df, TARGET_COLS)
+        X_train, y_train, X_test, y_test, features, scaler = prepare_lstm_data(df, TARGET_COLS)
         y_train_scaled, y_test_scaled, target_scaler = scale_targets(y_train, y_test)
         X_train_t = torch.tensor(X_train, dtype=torch.float32)
         y_train_t = torch.tensor(y_train_scaled, dtype=torch.float32)
@@ -167,6 +168,10 @@ def train(
             if save_path.is_dir():
                 save_path = save_path / f"lstm_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pt"
             save_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # TODO: 标签数据需要一个统一的编码器
+            le_category = LabelEncoder()
+            le_category.fit(df['category'])
         
             torch.save({
                 'model_state_dict': net.state_dict(),
@@ -176,13 +181,88 @@ def train(
                 'output_size': output_size,
                 'target_scaler': target_scaler,
                 'feature_scaler': scaler,
+                'feature_names': features,
                 'target_names': TARGET_COLS,
+                'category_classes': le_category.classes_.tolist(),
                 'model_type': 'lstm',
             }, save_path)
         typer.echo(f"LSTM model saved to {save_path}")
     else:
         typer.echo("Unknown model.")
 
+@app.command()
+def predict(model_file: Annotated[Path, typer.Option(help="Saved model file")], data_file: Annotated[Path, typer.Option(help="Stores, dates, features CSV file")]):
+    checkpoint = torch.load(model_file, map_location='cpu', weights_only=False)
+    df = pd.read_csv(data_file, parse_dates=['date'])
+    df = df.sort_values(['sid', 'date']).reset_index(drop=True)
+
+    df['weekday'] = df['date'].dt.weekday
+    df['month'] = df['date'].dt.month
+    df['day_of_year'] = df['date'].dt.dayofyear
+
+    category_classes = checkpoint['category_classes']
+    le = LabelEncoder()
+    le.classes_ = np.array(category_classes)
+    df['category_code'] = le.transform(df['category'])
+    
+    for idx, row in df.iterrows():
+        weather = get_weather(lat=row['latitude'], lon=row['longitude'], date_str=row['date'].strftime('%Y-%m-%d'))
+        df.at[idx, 'temperature'] = weather['temperature']
+        df.at[idx, 'weather_code'] = weather['weather_code']
+
+    feature_names = checkpoint.get('feature_names')
+
+    def build_sequences(df, feature_names, seq_len):
+        X_seq = []
+        dates_seq = []
+        sids_seq = []
+        for _sid, group in df.groupby('sid', sort=False):
+            group = group.sort_values('date')
+            X_group = group[feature_names].values
+            dates_group = group['date'].values
+            sid_group = group['sid'].values
+            for i in range(seq_len, len(group)):
+                X_seq.append(X_group[i-seq_len:i])
+                dates_seq.append(dates_group[i])
+                sids_seq.append(sid_group[i])
+        return np.asarray(X_seq), dates_seq, sids_seq
+
+    X_raw, dates, sids = build_sequences(df, feature_names, 7)
+    if len(X_raw) == 0:
+        raise ValueError("Not enough data to form sequences. Need at least seq_len rows per store.")
+
+    # 标准化
+    feature_scaler = checkpoint['feature_scaler']
+    n_samples, seq_len_, n_feats = X_raw.shape
+    X_flat = X_raw.reshape(-1, n_feats)
+    X_flat_scaled = feature_scaler.transform(X_flat)
+    X_scaled = X_flat_scaled.reshape(n_samples, seq_len_, n_feats)
+
+    input_size = checkpoint['input_size']
+    hidden_size = checkpoint['hidden_size']
+    num_layers = checkpoint['num_layers']
+    output_size = checkpoint['output_size']
+    net = LSTMModel(input_size, hidden_size, num_layers, output_size)
+    net.load_state_dict(checkpoint['model_state_dict'])
+    net.eval()
+
+    X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
+    with torch.no_grad():
+        y_pred_scaled = net(X_tensor).numpy()
+
+    target_scaler = checkpoint['target_scaler']
+    y_pred = target_scaler.inverse_transform(y_pred_scaled)
+
+    target_names = checkpoint['target_names']
+    pred_df = pd.DataFrame({
+        'sid': sids,
+        'date': dates
+    })
+    for i, name in enumerate(target_names):
+        pred_df[name] = y_pred[:, i]
+
+    print(pred_df.head(20) if len(pred_df) > 20 else pred_df)
+    typer.echo(f"\nTotal predictions: {len(pred_df)}")
 
 def main() -> None:
     app()

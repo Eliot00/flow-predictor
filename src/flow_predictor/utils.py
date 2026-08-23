@@ -23,7 +23,7 @@ def get_weather(
     """
     调用免费天气API，可用的值有：
     {
-        'weather_code': int,      # 天气代码，省了我one hot
+        'weather_code': int,      # 天气代码
         'temperature': float,     # 平均温度
         'precipitation': float,   # 总降水量 (mm)
         'wind_speed': float,      # 最大风速 (km/h)
@@ -41,31 +41,29 @@ def get_weather(
         f"https://archive-api.open-meteo.com/v1/archive"
         f"?latitude={lat}&longitude={lon}"
         f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,"
-        f"windspeed_10m_max,relativehumidity_2m_mean,weathercode"
+        f"windspeed_10m_max,relative_humidity_2m_mean,weathercode"
         f"&timezone=Asia/Shanghai"
         f"&start_date={date_str}&end_date={date_str}"
     )
     try:
         resp = requests.get(url, timeout=10)
         data = resp.json()
-        daily = data.get("daily", {})
-
-        # 缺失则给默认值
-        def safe_get(arr, idx=0, default=0.0):
-            return arr[idx] if arr and arr[idx] is not None else default
-        
-        result = {
-            'weather_code': int(safe_get(daily.get('weathercode', []), 0, 0)),
-            'temperature': (safe_get(daily.get('temperature_2m_max', [])) + 
-                            safe_get(daily.get('temperature_2m_min', []))) / 2,
-            'precipitation': safe_get(daily.get('precipitation_sum', [])),
-            'wind_speed': safe_get(daily.get('windspeed_10m_max', [])),
-            'humidity': safe_get(daily.get('relativehumidity_2m_mean', []))
-        }
-        # 若完全没有数据，返回默认值
-        if not daily:
+        if "error" in data and data["error"]:
+            print(f"API error for {date_str}: {data.get('reason', 'Unknown error')}")
             result = {'weather_code': 1, 'temperature': 15.0, 'precipitation': 0, 'wind_speed': 5, 'humidity': 65}
-        
+        else:
+            daily = data.get("daily", {})
+            def safe_get(arr, idx=0, default=0.0):
+                return arr[idx] if arr and arr[idx] is not None else default
+            
+            result = {
+                'weather_code': int(safe_get(daily.get('weathercode', []), 0, 0)),
+                'temperature': (safe_get(daily.get('temperature_2m_max', [])) + 
+                                safe_get(daily.get('temperature_2m_min', []))) / 2,
+                'precipitation': safe_get(daily.get('precipitation_sum', [])),
+                'wind_speed': safe_get(daily.get('windspeed_10m_max', [])),
+                'humidity': safe_get(daily.get('relative_humidity_2m_mean', []))
+            }
         cache[key] = result
         _save_cache(cache)
         return result
