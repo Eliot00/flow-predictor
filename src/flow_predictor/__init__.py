@@ -1,7 +1,7 @@
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import pandas as pd
 import torch
@@ -59,6 +59,9 @@ def train(
     lag: Annotated[
         str | None, typer.Option(help="Comma-separated lag days, e.g. '1,7'")
     ] = None,
+    save_path: Annotated[
+        Path | None, typer.Option(help="Directory or file path to save the trained model")
+    ] = None
 ):
     set_seed()
     if data_file is not None:
@@ -74,7 +77,7 @@ def train(
         typer.echo("Using fake data")
 
     if model == "linear":
-        X_train_scaled, X_test_scaled, y_train, y_test, features = prepare_data(
+        X_train_scaled, X_test_scaled, y_train, y_test, features, _ = prepare_data(
             df, ["passby_visit", "entering_people", "dwell_people", "served_people"]
         )
         model_ = LinearRegression()
@@ -92,7 +95,7 @@ def train(
         print(coef_df)
     elif model == "mlp":
         lag_days = [int(x.strip()) for x in lag.split(",")] if lag else None
-        X_train_scaled, X_test_scaled, y_train, y_test, _ = prepare_data(
+        X_train_scaled, X_test_scaled, y_train, y_test, features, scaler = prepare_data(
             df, TARGET_COLS, lag_days
         )
         y_train_scaled, y_test_scaled, target_scaler = scale_targets(y_train, y_test)
@@ -117,8 +120,25 @@ def train(
             target_scaler=target_scaler,
             target_names=TARGET_COLS,
         )
+        if save_path:
+            save_path = Path(save_path)
+            if save_path.is_dir():
+                save_path = save_path / f"mlp_model_{datetime.now().strftime("%Y-%m-%d_%H%M%S")}.pt"
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save({
+                'model_state_dict': net.state_dict(),
+                'input_dim': input_dim,
+                'hidden_size': hidden_size,
+                'output_dim': output_dim,
+                'target_scaler': target_scaler,
+                'feature_scaler': scaler,
+                'feature_names': features,
+                'target_names': TARGET_COLS,
+                'model_type': 'mlp',
+            }, save_path)
+            typer.echo(f"Model saved to {save_path}")
     elif model == "lstm":
-        X_train, y_train, X_test, y_test = prepare_lstm_data(df, TARGET_COLS)
+        X_train, y_train, X_test, y_test, scaler = prepare_lstm_data(df, TARGET_COLS)
         y_train_scaled, y_test_scaled, target_scaler = scale_targets(y_train, y_test)
         X_train_t = torch.tensor(X_train, dtype=torch.float32)
         y_train_t = torch.tensor(y_train_scaled, dtype=torch.float32)
@@ -142,6 +162,24 @@ def train(
             target_scaler=target_scaler,
             target_names=TARGET_COLS,
         )
+        if save_path:
+            save_path = Path(save_path)
+            if save_path.is_dir():
+                save_path = save_path / f"lstm_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pt"
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+        
+            torch.save({
+                'model_state_dict': net.state_dict(),
+                'input_size': input_size,
+                'hidden_size': hidden_size,
+                'num_layers': 2,
+                'output_size': output_size,
+                'target_scaler': target_scaler,
+                'feature_scaler': scaler,
+                'target_names': TARGET_COLS,
+                'model_type': 'lstm',
+            }, save_path)
+        typer.echo(f"LSTM model saved to {save_path}")
     else:
         typer.echo("Unknown model.")
 

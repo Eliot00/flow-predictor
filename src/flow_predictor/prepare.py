@@ -5,7 +5,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 def prepare_data(
     df: pd.DataFrame, target_cols: list[str], lag_days: list[int] | None = None
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str]]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str], StandardScaler]:
     df = df.copy()
     sort_cols = ["date"] + (["sid"] if "sid" in df.columns else [])
     df = df.sort_values(sort_cols).reset_index(drop=True)
@@ -79,12 +79,12 @@ def prepare_data(
     X_train_scaled[num_cols] = scaler.fit_transform(X_train[num_cols])
     X_test_scaled[num_cols] = scaler.transform(X_test[num_cols])
 
-    return X_train_scaled, X_test_scaled, y_train, y_test, features
+    return X_train_scaled, X_test_scaled, y_train, y_test, features, scaler
 
 
 def prepare_lstm_data(
     df: pd.DataFrame, target_cols: list[str], seq_len: int = 7, train_ratio: float = 0.8
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, StandardScaler]:
     """
     按店铺和时间构建序列，并按日期划分训练集和测试集。
 
@@ -129,7 +129,6 @@ def prepare_lstm_data(
             group = group.sort_values("date")
             X_group = group[features].values
             y_group = group[target_cols].values
-            dates_group = group["date"].values
             for i in range(seq_len, len(group)):
                 # 窗口只到目标日前一天；测试目标使用训练期历史上下文。
                 if target_mask.iloc[group.index[i]]:
@@ -149,7 +148,7 @@ def prepare_lstm_data(
     X_train = scale_3d(X_train_raw)
     X_test = scale_3d(X_test_raw)
 
-    return X_train, y_train, X_test, y_test
+    return X_train, y_train, X_test, y_test, scaler
 
 
 # 实际数据中，passby和其他数据不在一个量级，target也要做标准化
