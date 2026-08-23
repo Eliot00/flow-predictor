@@ -84,7 +84,7 @@ def prepare_data(
 
 def prepare_lstm_data(
     df: pd.DataFrame, target_cols: list[str], seq_len: int = 7, train_ratio: float = 0.8
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, StandardScaler]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str], StandardScaler]:
     """
     按店铺和时间构建序列，并按日期划分训练集和测试集。
 
@@ -148,7 +148,7 @@ def prepare_lstm_data(
     X_train = scale_3d(X_train_raw)
     X_test = scale_3d(X_test_raw)
 
-    return X_train, y_train, X_test, y_test, scaler
+    return X_train, y_train, X_test, y_test, features, scaler
 
 
 # 实际数据中，passby和其他数据不在一个量级，target也要做标准化
