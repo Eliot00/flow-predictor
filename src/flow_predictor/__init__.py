@@ -13,7 +13,12 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 from flow_predictor.fake import fake_all
 from flow_predictor.network import MLP, LSTMModel, train_torch_model
-from flow_predictor.prepare import prepare_data, prepare_lstm_data, scale_targets
+from flow_predictor.prepare import (
+    add_calendar_features,
+    prepare_data,
+    prepare_lstm_data,
+    scale_targets,
+)
 from flow_predictor.utils import set_seed, get_weather
 
 app = typer.Typer()
@@ -196,9 +201,7 @@ def predict(model_file: Annotated[Path, typer.Option(help="Saved model file")], 
     df = pd.read_csv(data_file, parse_dates=['date'])
     df = df.sort_values(['sid', 'date']).reset_index(drop=True)
 
-    df['weekday'] = df['date'].dt.weekday
-    df['month'] = df['date'].dt.month
-    df['day_of_year'] = df['date'].dt.dayofyear
+    df = add_calendar_features(df)
 
     category_classes = checkpoint['category_classes']
     le = LabelEncoder()

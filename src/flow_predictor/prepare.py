@@ -3,10 +3,53 @@ import pandas as pd
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 
+BASE_FEATURES = [
+    "area",
+    "longitude",
+    "latitude",
+    "temperature",
+    "oil_price",
+    "weekday",
+    "month",
+    "day_of_year",
+    "weather_code",
+    "category_code",
+]
+
+NUMERIC_FEATURES = BASE_FEATURES[:-2]  # 排除两个 *_code 编码列
+
+
+def add_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
+    """添加 weekday/month/day_of_year 日历特征。"""
+    df = df.copy()
+    df["weekday"] = df["date"].dt.weekday
+    df["month"] = df["date"].dt.month
+    df["day_of_year"] = df["date"].dt.dayofyear
+    return df
+
+
+def add_time_and_encode_features(df: pd.DataFrame) -> pd.DataFrame:
+    """添加日历特征，并对 weather/category 做 LabelEncoder 编码。"""
+    df = add_calendar_features(df)
+
+    le_weather = LabelEncoder()
+    le_category = LabelEncoder()
+    df["weather_code"] = le_weather.fit_transform(df["weather"])
+    df["category_code"] = le_category.fit_transform(df["category"])
+    return df
+
+
+def split_by_date(df: pd.DataFrame, train_ratio: float = 0.8):
+    """按日期分位数划分训练/测试掩码。"""
+    split_date = df["date"].quantile(train_ratio)
+    train_mask = df["date"] <= split_date
+    return train_mask, ~train_mask
+
+
 def prepare_data(
     df: pd.DataFrame, target_cols: list[str], lag_days: list[int] | None = None
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str], StandardScaler]:
-    df = df.copy()
+    df = add_time_and_encode_features(df)
     sort_cols = ["date"] + (["sid"] if "sid" in df.columns else [])
     df = df.sort_values(sort_cols).reset_index(drop=True)
 
@@ -31,18 +74,7 @@ def prepare_data(
     df["weather_code"] = le_weather.fit_transform(df["weather"])
     df["category_code"] = le_category.fit_transform(df["category"])
 
-    base_features = [
-        "area",
-        "longitude",
-        "latitude",
-        "temperature",
-        "oil_price",
-        "weekday",
-        "month",
-        "day_of_year",
-        "weather_code",
-        "category_code",
-    ]
+    base_features = BASE_FEATURES
     if lag_days:
         lag_features = [f"{t}_lag_{lag}" for t in target_cols for lag in lag_days]
         features = base_features + lag_features
@@ -53,23 +85,12 @@ def prepare_data(
     y = df[target_cols]
 
     # 按日期划分训练和测试集
-    split_date = df["date"].quantile(0.8)
-    train_mask = df["date"] <= split_date
-    test_mask = ~train_mask
+    train_mask, test_mask = split_by_date(df)
     X_train, X_test = X.loc[train_mask], X.loc[test_mask]
     y_train, y_test = y.loc[train_mask], y.loc[test_mask]
 
     # 数值特征做标准化
-    num_cols = [
-        "area",
-        "longitude",
-        "latitude",
-        "temperature",
-        "oil_price",
-        "weekday",
-        "month",
-        "day_of_year",
-    ]
+    num_cols = NUMERIC_FEATURES[:]
     if lag_days:
         num_cols += [f"{t}_lag_{lag}" for t in target_cols for lag in lag_days]
 
@@ -91,33 +112,12 @@ def prepare_lstm_data(
     测试集的第一个窗口可以使用切分日期之前的 ``seq_len`` 天作为历史上下文，
     但测试目标本身不会参与训练或输入窗口。
     """
-    df = df.copy()
+    df = add_time_and_encode_features(df)
     df = df.sort_values(["sid", "date"]).reset_index(drop=True)
-    df["weekday"] = df["date"].dt.weekday
-    df["month"] = df["date"].dt.month
-    df["day_of_year"] = df["date"].dt.dayofyear
 
-    le_weather = LabelEncoder()
-    le_category = LabelEncoder()
-    df["weather_code"] = le_weather.fit_transform(df["weather"])
-    df["category_code"] = le_category.fit_transform(df["category"])
+    features = BASE_FEATURES
 
-    features = [
-        "area",
-        "longitude",
-        "latitude",
-        "temperature",
-        "oil_price",
-        "weekday",
-        "month",
-        "day_of_year",
-        "weather_code",
-        "category_code",
-    ]
-
-    split_date = df["date"].quantile(train_ratio)
-    train_mask = df["date"] <= split_date
-    test_mask = ~train_mask
+    train_mask, test_mask = split_by_date(df, train_ratio)
     train_df = df.loc[train_mask]
 
     scaler = StandardScaler()
