@@ -67,4 +67,3 @@ served_people: MSE=33.84 R2=0.69
 ## 问题记录
 
 - Fine-tune 新增店铺，LSTM上没有历史数据
-- 油价没有合适的API，干脆去掉

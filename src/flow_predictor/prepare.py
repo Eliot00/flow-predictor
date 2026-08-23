@@ -8,7 +8,6 @@ BASE_FEATURES = [
     "longitude",
     "latitude",
     "temperature",
-    "oil_price",
     "weekday",
     "month",
     "day_of_year",

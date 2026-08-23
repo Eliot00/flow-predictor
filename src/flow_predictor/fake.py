@@ -38,16 +38,6 @@ def fake_all():
     base_temp = 15 + 25 * np.sin(2 * np.pi * (day_of_year - 80) / 365)
     df["temperature"] = base_temp + np.random.normal(0, 3, size=len(df))
 
-    # 油价，按每年在涨模拟
-    years_since_start = df["date"].dt.year - 2016
-    base_oil = (
-        5.0
-        + 0.3 * years_since_start
-        + 0.5 * np.sin(2 * np.pi * df["date"].dt.dayofyear / 365)
-    )
-    df["oil_price"] = base_oil + np.random.normal(0, 0.2, size=len(df))
-    df["oil_price"] = df["oil_price"].clip(4.0, 9.0)
-
     # 周末，节假日，后续放到特征工程里
     df["is_weekend"] = df["date"].dt.weekday.isin([5, 6]).astype(int)
 
@@ -97,10 +87,9 @@ def fake_all():
     )
     df["dwell_people"] = df["dwell_people"].clip(0)
 
-    # 基础服务率50%，油价越高服务率越低，手表类目服务率高
+    # 基础服务率50%，手表类目服务率高
     serve_rate = (
         0.5
-        - 0.02 * (df["oil_price"] - 5)
         + 0.10 * (df["category"] == "手表").astype(int)
     )
     serve_rate = serve_rate.clip(0.2, 0.85)
