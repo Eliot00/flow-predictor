@@ -17,7 +17,7 @@ from flow_predictor.prepare import (
     add_calendar_features,
     prepare_data,
     prepare_lstm_data,
-    scale_targets,
+    transform_targets,
 )
 from flow_predictor.utils import set_seed, get_weather
 
@@ -41,7 +41,7 @@ def prepare():
         get_weather(lon=121.4455, lat=31.2264, date_str=current.strftime("%Y-%m-%d"))
         time.sleep(1)
         current += timedelta(days=1)
-    
+
 @app.command()
 def train(
     data_file: Annotated[
@@ -104,11 +104,11 @@ def train(
         X_train_scaled, X_test_scaled, y_train, y_test, features, scaler = prepare_data(
             df, TARGET_COLS, lag_days
         )
-        y_train_scaled, y_test_scaled, target_scaler = scale_targets(y_train, y_test)
+        y_train_log, y_test_log = transform_targets(y_train.values, y_test.values)
         X_train_t = torch.tensor(X_train_scaled.values, dtype=torch.float32)
-        y_train_t = torch.tensor(y_train_scaled, dtype=torch.float32)
+        y_train_t = torch.tensor(y_train_log, dtype=torch.float32)
         X_test_t = torch.tensor(X_test_scaled.values, dtype=torch.float32)
-        y_test_t = torch.tensor(y_test_scaled, dtype=torch.float32)
+        y_test_t = torch.tensor(y_test_log, dtype=torch.float32)
 
         input_dim = X_train_t.shape[1]
         output_dim = y_train_t.shape[1]
@@ -123,7 +123,6 @@ def train(
             epochs=epochs,
             batch_size=batch_size,
             lr=lr,
-            target_scaler=target_scaler,
             target_names=TARGET_COLS,
         )
         if save_path:
@@ -136,7 +135,6 @@ def train(
                 'input_dim': input_dim,
                 'hidden_size': hidden_size,
                 'output_dim': output_dim,
-                'target_scaler': target_scaler,
                 'feature_scaler': scaler,
                 'feature_names': features,
                 'target_names': TARGET_COLS,
@@ -145,14 +143,14 @@ def train(
             typer.echo(f"Model saved to {save_path}")
     elif model == "lstm":
         X_train, y_train, X_test, y_test, features, scaler = prepare_lstm_data(df, TARGET_COLS)
-        y_train_scaled, y_test_scaled, target_scaler = scale_targets(y_train, y_test)
+        y_train_log, y_test_log = transform_targets(y_train, y_test)
         X_train_t = torch.tensor(X_train, dtype=torch.float32)
-        y_train_t = torch.tensor(y_train_scaled, dtype=torch.float32)
+        y_train_t = torch.tensor(y_train_log, dtype=torch.float32)
         X_test_t = torch.tensor(X_test, dtype=torch.float32)
-        y_test_t = torch.tensor(y_test_scaled, dtype=torch.float32)
+        y_test_t = torch.tensor(y_test_log, dtype=torch.float32)
 
         input_size = X_train.shape[2]
-        output_size = y_train_scaled.shape[1]
+        output_size = y_train_log.shape[1]
         net = LSTMModel(
             input_size, hidden_size=hidden_size, num_layers=2, output_size=output_size
         )
@@ -165,7 +163,6 @@ def train(
             epochs=epochs,
             batch_size=batch_size,
             lr=lr,
-            target_scaler=target_scaler,
             target_names=TARGET_COLS,
         )
         if save_path:
@@ -177,18 +174,17 @@ def train(
             # TODO: 标签数据需要一个统一的编码器
             le_category = LabelEncoder()
             le_category.fit(df['category'])
-        
+
             torch.save({
                 'model_state_dict': net.state_dict(),
                 'input_size': input_size,
                 'hidden_size': hidden_size,
                 'num_layers': 2,
                 'output_size': output_size,
-                'target_scaler': target_scaler,
                 'feature_scaler': scaler,
                 'feature_names': features,
                 'target_names': TARGET_COLS,
-                'category_classes': le_category.classes_.tolist(),
+                'category_classes': sorted(df['category'].unique().tolist()),
                 'model_type': 'lstm',
             }, save_path)
         typer.echo(f"LSTM model saved to {save_path}")
@@ -203,11 +199,11 @@ def predict(model_file: Annotated[Path, typer.Option(help="Saved model file")], 
 
     df = add_calendar_features(df)
 
-    category_classes = checkpoint['category_classes']
+    # 用训练时的类别集合做 LabelEncoder，保证训练/预测一致
     le = LabelEncoder()
-    le.classes_ = np.array(category_classes)
+    le.classes_ = np.array(checkpoint['category_classes'])
     df['category_code'] = le.transform(df['category'])
-    
+
     for idx, row in df.iterrows():
         weather = get_weather(lat=row['latitude'], lon=row['longitude'], date_str=row['date'].strftime('%Y-%m-%d'))
         df.at[idx, 'temperature'] = weather['temperature']
@@ -253,8 +249,7 @@ def predict(model_file: Annotated[Path, typer.Option(help="Saved model file")], 
     with torch.no_grad():
         y_pred_scaled = net(X_tensor).numpy()
 
-    target_scaler = checkpoint['target_scaler']
-    y_pred = target_scaler.inverse_transform(y_pred_scaled)
+    y_pred = np.expm1(y_pred_scaled)
 
     target_names = checkpoint['target_names']
     pred_df = pd.DataFrame({

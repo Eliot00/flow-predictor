@@ -1,8 +1,8 @@
 from collections.abc import Sequence
 
+import numpy as np
 import torch
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.preprocessing import StandardScaler
 from torch import nn, optim
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -54,15 +54,13 @@ def train_torch_model(
     batch_size: int = 32,
     weight_decay: float = 1e-4,
     grad_clip: float | None = 1.0,
-    target_scaler: StandardScaler | None = None,
     target_names: Sequence[str] | None = None,
     verbose: bool = True,
 ) -> nn.Module:
-    """Train a torch regressor.
+    """Train a torch regressor on log1p-transformed targets.
 
-    ``y_train`` and ``y_test`` may be in a transformed space.  If
-    ``target_scaler`` is provided, losses are optimized in that space while
-    the reported metrics are converted back to the original target units.
+    ``y_train`` and ``y_test`` are in log1p space; losses are optimized there
+    while the reported metrics are converted back to original units via expm1.
     """
     criterion = nn.MSELoss()
     optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
@@ -88,11 +86,8 @@ def train_torch_model(
                 test_pred = net(X_test)
                 test_loss = criterion(test_pred, y_test).item()
 
-                y_true_np = y_test.cpu().numpy()
-                y_pred_np = test_pred.cpu().numpy()
-                if target_scaler is not None:
-                    y_true_np = target_scaler.inverse_transform(y_true_np)
-                    y_pred_np = target_scaler.inverse_transform(y_pred_np)
+                y_true_np = np.expm1(y_test.cpu().numpy())
+                y_pred_np = np.expm1(test_pred.cpu().numpy())
 
                 target_mse = mean_squared_error(
                     y_true_np, y_pred_np, multioutput="raw_values"

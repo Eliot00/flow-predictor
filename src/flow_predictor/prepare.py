@@ -63,15 +63,6 @@ def prepare_data(
                     df[f"{target}_lag_{lag}"] = df[target].shift(lag)
         # 前几行因为lag产生的nan删掉
         df = df.dropna()
-    
-    df["weekday"] = df["date"].dt.weekday
-    df["month"] = df["date"].dt.month
-    df["day_of_year"] = df["date"].dt.dayofyear
-
-    le_weather = LabelEncoder()
-    le_category = LabelEncoder()
-    df["weather_code"] = le_weather.fit_transform(df["weather"])
-    df["category_code"] = le_category.fit_transform(df["category"])
 
     base_features = BASE_FEATURES
     if lag_days:
@@ -79,7 +70,7 @@ def prepare_data(
         features = base_features + lag_features
     else:
         features = base_features
-        
+
     X = df[features]
     y = df[target_cols]
 
@@ -150,9 +141,7 @@ def prepare_lstm_data(
     return X_train, y_train, X_test, y_test, features, scaler
 
 
-# 实际数据中，passby和其他数据不在一个量级，target也要做标准化
-def scale_targets(y_train, y_test):
-    scaler = StandardScaler()
-    y_train_scaled = scaler.fit_transform(y_train)
-    y_test_scaled = scaler.transform(y_test)
-    return y_train_scaled, y_test_scaled, scaler
+# 实际数据中，passby和其他数据不在一个量级，target用log1p变换：
+# 压缩长尾、统一相对误差尺度，且 expm1 反变换后预测值恒为正
+def transform_targets(y_train, y_test):
+    return np.log1p(y_train), np.log1p(y_test)
