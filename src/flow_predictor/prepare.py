@@ -2,12 +2,14 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-
 BASE_FEATURES = [
     "area",
     "longitude",
     "latitude",
     "temperature",
+    "precipitation",
+    "wind_speed",
+    "humidity",
     "weekday",
     "month",
     "day_of_year",
@@ -29,6 +31,7 @@ def add_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # chinese_calendar 的 is_workday 已包含调休逻辑：调休上班的周末返回 True
     import chinese_calendar as cn_cal
+
     dates = df["date"].dt.date
     df["is_workday"] = [int(cn_cal.is_workday(d)) for d in dates]
     df["is_holiday"] = [int(not cn_cal.is_workday(d)) for d in dates]
@@ -36,12 +39,14 @@ def add_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_time_and_encode_features(df: pd.DataFrame) -> pd.DataFrame:
-    """添加日历特征，并对 weather/category 做 LabelEncoder 编码。"""
+    """添加日历特征，并对 category 做 LabelEncoder 编码。
+
+    weather_code是WMO标准天气代码
+    """
     df = add_calendar_features(df)
 
-    le_weather = LabelEncoder()
+    # TODO: 这块可能有多tags
     le_category = LabelEncoder()
-    df["weather_code"] = le_weather.fit_transform(df["weather"])
     df["category_code"] = le_category.fit_transform(df["category"])
     return df
 
@@ -55,7 +60,9 @@ def split_by_date(df: pd.DataFrame, train_ratio: float = 0.8):
 
 def prepare_data(
     df: pd.DataFrame, target_cols: list[str], lag_days: list[int] | None = None
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str], StandardScaler]:
+) -> tuple[
+    pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str], StandardScaler
+]:
     df = add_time_and_encode_features(df)
     sort_cols = ["date"] + (["sid"] if "sid" in df.columns else [])
     df = df.sort_values(sort_cols).reset_index(drop=True)
@@ -66,7 +73,7 @@ def prepare_data(
         for target in target_cols:
             for lag in lag_days:
                 if "sid" in df.columns:
-                    df[f"{target}_lag_{lag}"] = df.groupby('sid')[target].shift(lag)
+                    df[f"{target}_lag_{lag}"] = df.groupby("sid")[target].shift(lag)
                 else:
                     df[f"{target}_lag_{lag}"] = df[target].shift(lag)
         # 前几行因为lag产生的nan删掉

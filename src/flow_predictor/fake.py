@@ -28,18 +28,35 @@ def fake_all():
         columns=["date", "sid", "area", "longitude", "latitude", "category"],
     )
 
-    # 天气理论上可以用API拿真实的（真实数据还会和地理位置有关），先随机
-    weather_choices = ["晴", "阴", "雨"]
-    weather_probs = [0.6, 0.25, 0.15]
-    df["weather"] = np.random.choice(weather_choices, size=len(df), p=weather_probs)
+    # 天气用 WMO 标准代码（和 open-meteo API 一致）：0晴 1-3多云 51/61雨
+    weather_choices = [0, 1, 2, 3, 51, 61, 63]
+    weather_probs = [0.35, 0.2, 0.15, 0.15, 0.05, 0.06, 0.04]
+    df["weather_code"] = np.random.choice(
+        weather_choices, size=len(df), p=weather_probs
+    )
+    is_rain = (
+        df["weather_code"].isin([51, 53, 55, 61, 63, 65, 80, 81, 82]).astype(float)
+    )
 
     # 模拟下四季，国内差不多零下10到40吧
     day_of_year = df["date"].dt.dayofyear
     base_temp = 15 + 25 * np.sin(2 * np.pi * (day_of_year - 80) / 365)
     df["temperature"] = base_temp + np.random.normal(0, 3, size=len(df))
 
+    # 降水/风速/湿度，和天气代码保持一致（雨天有降水）
+    df["precipitation"] = np.where(
+        is_rain > 0,
+        np.random.gamma(2.0, 3.0, size=len(df)),  # 雨天：0~30mm 偏态分布
+        0.0,
+    )
+    df["wind_speed"] = np.clip(np.random.normal(12, 5, size=len(df)), 1, None)
+    df["humidity"] = np.clip(
+        np.random.normal(60, 15, size=len(df)) + 20 * is_rain, 20, 100
+    )
+
     # 周末，节假日，调休（chinese_calendar：is_workday 对调休上班的周末返回 True）
     import chinese_calendar as cn_cal
+
     df["is_workday"] = [int(cn_cal.is_workday(d.date())) for d in df["date"]]
     df["is_weekend"] = df["date"].dt.weekday.isin([5, 6]).astype(int)
     df["is_holiday"] = [int(not cn_cal.is_workday(d.date())) for d in df["date"]]
@@ -47,13 +64,25 @@ def fake_all():
     # 生成假的客流，基于一些假设的关系
     # 面积越大、位置越好，客流越大
     base_passby = 200 + 0.8 * df["area"] + 20 * (df["latitude"] - 30)
-    # 天气系数，晴天人多，雨天人少
-    weather_factor = df["weather"].map({"晴": 1.0, "阴": 0.8, "雨": 0.5})
+    # 天气系数：晴好天气人多，雨雪天少
+    weather_factor = (
+        df["weather_code"]
+        .map({0: 1.0, 1: 0.95, 2: 0.85, 3: 0.75, 51: 0.6, 61: 0.5, 63: 0.4})
+        .fillna(0.5)
+    )
+    # 降水量额外压制（每10mm约降3%）
+    rain_penalty = 1 - 0.03 * df["precipitation"] / 10 * 10
+    weather_factor = weather_factor * rain_penalty.clip(0.6, 1.0)
     # 温度，太冷太热不行
     temp_factor = 1 - 0.004 * (df["temperature"] - 20) ** 2
     temp_factor = temp_factor.clip(0.4, 1.0)
     # 周末人多，法定假日更多；调休上班的周末接近工作日
-    weekend_factor = 1 + 0.3 * df["is_weekend"] + 0.25 * df["is_holiday"] - 0.15 * ((df["is_weekend"] == 1) & (df["is_workday"] == 1)).astype(int)
+    weekend_factor = (
+        1
+        + 0.3 * df["is_weekend"]
+        + 0.25 * df["is_holiday"]
+        - 0.15 * ((df["is_weekend"] == 1) & (df["is_workday"] == 1)).astype(int)
+    )
     # 加点随机波动
     noise = np.random.normal(1, 0.12, len(df))
     df["passby_visit"] = (
@@ -66,7 +95,7 @@ def fake_all():
     # 基础进店率15%，雨天进店率翻倍（躲雨），服装店进店率高一些
     enter_rate = (
         0.15
-        + 0.12 * (df["weather"] == "雨").astype(int)
+        + 0.12 * df["weather_code"].isin([51, 53, 55, 61, 63, 65]).astype(int)
         + 0.05 * (df["category"] == "服装").astype(int)
     )
     df["entering_people"] = (
@@ -91,10 +120,7 @@ def fake_all():
     df["dwell_people"] = df["dwell_people"].clip(0)
 
     # 基础服务率50%，手表类目服务率高
-    serve_rate = (
-        0.5
-        + 0.10 * (df["category"] == "手表").astype(int)
-    )
+    serve_rate = 0.5 + 0.10 * (df["category"] == "手表").astype(int)
     serve_rate = serve_rate.clip(0.2, 0.85)
     df["served_people"] = (
         (df["dwell_people"] * serve_rate * np.random.normal(1, 0.10, len(df)))

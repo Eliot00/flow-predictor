@@ -2,14 +2,15 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import torch
 import typer
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import LabelEncoder
 
 from flow_predictor.fake import fake_all
 from flow_predictor.network import MLP, LSTMModel, train_torch_model
@@ -19,7 +20,7 @@ from flow_predictor.prepare import (
     prepare_lstm_data,
     transform_targets,
 )
-from flow_predictor.utils import set_seed, get_weather
+from flow_predictor.utils import get_weather, set_seed
 
 app = typer.Typer()
 
@@ -30,11 +31,16 @@ TARGET_COLS = [
     "served_people",
 ]
 
+
+# 业务时区：国内店铺用东八区；国外店铺的数据采集层应统一转换到此时区再入库
+BUSINESS_TZ = ZoneInfo("Asia/Shanghai")
+
+
 @app.command()
 def prepare():
     # 临时模拟
-    start_date = datetime(2026, 1, 1)
-    end_date = datetime.now() - timedelta(days=1)
+    start_date = datetime(2026, 1, 1, tzinfo=BUSINESS_TZ)
+    end_date = datetime.now(tz=BUSINESS_TZ) - timedelta(days=1)
 
     current = start_date
     while current <= end_date:
@@ -42,11 +48,10 @@ def prepare():
         time.sleep(1)
         current += timedelta(days=1)
 
+
 @app.command()
 def train(
-    data_file: Annotated[
-        Path | None, typer.Option(help="Real data file path")
-    ] = None,
+    data_file: Annotated[Path | None, typer.Option(help="Real data file path")] = None,
     model: Annotated[
         str, typer.Option(help="Model type: 'linear', 'mlp' or 'lstm'")
     ] = "linear",
@@ -59,15 +64,14 @@ def train(
     hidden_size: Annotated[
         int, typer.Option(help="Hidden layer size for MLP / LSTM hidden units")
     ] = 64,
-    lr: Annotated[
-        float, typer.Option(help="Learning rate (for MLP/LSTM)")
-    ] = 0.001,
+    lr: Annotated[float, typer.Option(help="Learning rate (for MLP/LSTM)")] = 0.001,
     lag: Annotated[
         str | None, typer.Option(help="Comma-separated lag days, e.g. '1,7'")
     ] = None,
     save_path: Annotated[
-        Path | None, typer.Option(help="Directory or file path to save the trained model")
-    ] = None
+        Path | None,
+        typer.Option(help="Directory or file path to save the trained model"),
+    ] = None,
 ):
     set_seed()
     if data_file is not None:
@@ -128,21 +132,29 @@ def train(
         if save_path:
             save_path = Path(save_path)
             if save_path.is_dir():
-                save_path = save_path / f"mlp_model_{datetime.now().strftime("%Y-%m-%d_%H%M%S")}.pt"
+                save_path = (
+                    save_path
+                    / f"mlp_model_{datetime.now(tz=BUSINESS_TZ).strftime('%Y-%m-%d_%H%M%S')}.pt"
+                )
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save({
-                'model_state_dict': net.state_dict(),
-                'input_dim': input_dim,
-                'hidden_size': hidden_size,
-                'output_dim': output_dim,
-                'feature_scaler': scaler,
-                'feature_names': features,
-                'target_names': TARGET_COLS,
-                'model_type': 'mlp',
-            }, save_path)
+            torch.save(
+                {
+                    "model_state_dict": net.state_dict(),
+                    "input_dim": input_dim,
+                    "hidden_size": hidden_size,
+                    "output_dim": output_dim,
+                    "feature_scaler": scaler,
+                    "feature_names": features,
+                    "target_names": TARGET_COLS,
+                    "model_type": "mlp",
+                },
+                save_path,
+            )
             typer.echo(f"Model saved to {save_path}")
     elif model == "lstm":
-        X_train, y_train, X_test, y_test, features, scaler = prepare_lstm_data(df, TARGET_COLS)
+        X_train, y_train, X_test, y_test, features, scaler = prepare_lstm_data(
+            df, TARGET_COLS
+        )
         y_train_log, y_test_log = transform_targets(y_train, y_test)
         X_train_t = torch.tensor(X_train, dtype=torch.float32)
         y_train_t = torch.tensor(y_train_log, dtype=torch.float32)
@@ -168,81 +180,100 @@ def train(
         if save_path:
             save_path = Path(save_path)
             if save_path.is_dir():
-                save_path = save_path / f"lstm_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pt"
+                save_path = (
+                    save_path
+                    / f"lstm_model_{datetime.now(tz=BUSINESS_TZ).strftime('%Y%m%d_%H%M%S')}.pt"
+                )
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
             # TODO: 标签数据需要一个统一的编码器
             le_category = LabelEncoder()
-            le_category.fit(df['category'])
+            le_category.fit(df["category"])
 
-            torch.save({
-                'model_state_dict': net.state_dict(),
-                'input_size': input_size,
-                'hidden_size': hidden_size,
-                'num_layers': 2,
-                'output_size': output_size,
-                'feature_scaler': scaler,
-                'feature_names': features,
-                'target_names': TARGET_COLS,
-                'category_classes': sorted(df['category'].unique().tolist()),
-                'model_type': 'lstm',
-            }, save_path)
+            torch.save(
+                {
+                    "model_state_dict": net.state_dict(),
+                    "input_size": input_size,
+                    "hidden_size": hidden_size,
+                    "num_layers": 2,
+                    "output_size": output_size,
+                    "feature_scaler": scaler,
+                    "feature_names": features,
+                    "target_names": TARGET_COLS,
+                    "category_classes": sorted(df["category"].unique().tolist()),
+                    "model_type": "lstm",
+                },
+                save_path,
+            )
         typer.echo(f"LSTM model saved to {save_path}")
     else:
         typer.echo("Unknown model.")
 
+
 @app.command()
-def predict(model_file: Annotated[Path, typer.Option(help="Saved model file")], data_file: Annotated[Path, typer.Option(help="Stores, dates, features CSV file")]):
-    checkpoint = torch.load(model_file, map_location='cpu', weights_only=False)
-    df = pd.read_csv(data_file, parse_dates=['date'])
-    df = df.sort_values(['sid', 'date']).reset_index(drop=True)
+def predict(
+    model_file: Annotated[Path, typer.Option(help="Saved model file")],
+    data_file: Annotated[Path, typer.Option(help="Stores, dates, features CSV file")],
+):
+    checkpoint = torch.load(model_file, map_location="cpu", weights_only=False)
+    df = pd.read_csv(data_file, parse_dates=["date"])
+    df = df.sort_values(["sid", "date"]).reset_index(drop=True)
 
     df = add_calendar_features(df)
 
     # 用训练时的类别集合做 LabelEncoder，保证训练/预测一致
     le = LabelEncoder()
-    le.classes_ = np.array(checkpoint['category_classes'])
-    df['category_code'] = le.transform(df['category'])
+    le.classes_ = np.array(checkpoint["category_classes"])
+    df["category_code"] = le.transform(df["category"])
 
     for idx, row in df.iterrows():
-        weather = get_weather(lat=row['latitude'], lon=row['longitude'], date_str=row['date'].strftime('%Y-%m-%d'))
-        df.at[idx, 'temperature'] = weather['temperature']
-        df.at[idx, 'weather_code'] = weather['weather_code']
+        weather = get_weather(
+            lat=row["latitude"],
+            lon=row["longitude"],
+            date_str=row["date"].strftime("%Y-%m-%d"),
+        )
+        df.at[idx, "temperature"] = weather["temperature"]
+        df.at[idx, "precipitation"] = weather["precipitation"]
+        df.at[idx, "wind_speed"] = weather["wind_speed"]
+        df.at[idx, "humidity"] = weather["humidity"]
+        df.at[idx, "weather_code"] = weather["weather_code"]
 
-    feature_names = checkpoint.get('feature_names')
+    feature_names = checkpoint.get("feature_names")
 
     def build_sequences(df, feature_names, seq_len):
         X_seq = []
         dates_seq = []
         sids_seq = []
-        for _sid, group in df.groupby('sid', sort=False):
-            group = group.sort_values('date')
+        for _sid, group in df.groupby("sid", sort=False):
+            group = group.sort_values("date")
             X_group = group[feature_names].values
-            dates_group = group['date'].values
-            sid_group = group['sid'].values
+            dates_group = group["date"].values
+            sid_group = group["sid"].values
             for i in range(seq_len, len(group)):
-                X_seq.append(X_group[i-seq_len:i])
+                X_seq.append(X_group[i - seq_len : i])
                 dates_seq.append(dates_group[i])
                 sids_seq.append(sid_group[i])
         return np.asarray(X_seq), dates_seq, sids_seq
 
     X_raw, dates, sids = build_sequences(df, feature_names, 7)
     if len(X_raw) == 0:
-        raise ValueError("Not enough data to form sequences. Need at least seq_len rows per store.")
+        raise ValueError(
+            "Not enough data to form sequences. Need at least seq_len rows per store."
+        )
 
     # 标准化
-    feature_scaler = checkpoint['feature_scaler']
+    feature_scaler = checkpoint["feature_scaler"]
     n_samples, seq_len_, n_feats = X_raw.shape
     X_flat = X_raw.reshape(-1, n_feats)
     X_flat_scaled = feature_scaler.transform(X_flat)
     X_scaled = X_flat_scaled.reshape(n_samples, seq_len_, n_feats)
 
-    input_size = checkpoint['input_size']
-    hidden_size = checkpoint['hidden_size']
-    num_layers = checkpoint['num_layers']
-    output_size = checkpoint['output_size']
+    input_size = checkpoint["input_size"]
+    hidden_size = checkpoint["hidden_size"]
+    num_layers = checkpoint["num_layers"]
+    output_size = checkpoint["output_size"]
     net = LSTMModel(input_size, hidden_size, num_layers, output_size)
-    net.load_state_dict(checkpoint['model_state_dict'])
+    net.load_state_dict(checkpoint["model_state_dict"])
     net.eval()
 
     X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
@@ -251,16 +282,14 @@ def predict(model_file: Annotated[Path, typer.Option(help="Saved model file")], 
 
     y_pred = np.expm1(y_pred_scaled)
 
-    target_names = checkpoint['target_names']
-    pred_df = pd.DataFrame({
-        'sid': sids,
-        'date': dates
-    })
+    target_names = checkpoint["target_names"]
+    pred_df = pd.DataFrame({"sid": sids, "date": dates})
     for i, name in enumerate(target_names):
         pred_df[name] = y_pred[:, i]
 
     print(pred_df.head(20) if len(pred_df) > 20 else pred_df)
     typer.echo(f"\nTotal predictions: {len(pred_df)}")
+
 
 def main() -> None:
     app()

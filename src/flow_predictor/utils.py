@@ -1,17 +1,19 @@
 import json
-from pathlib import Path
 import random
+from pathlib import Path
 
 import numpy as np
-import torch
 import requests
+import torch
 
 CACHE_FILE = Path.cwd() / "data" / "weather_cache.json"
+
 
 def set_seed(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
 
 def get_weather(
     lat: float,
@@ -31,8 +33,8 @@ def get_weather(
     }
     """
     if cache is None:
-        cache = _load_cache()
-    
+        cache = load_cache()
+
     key = f"{lat:.4f}_{lon:.4f}_{date_str}"
     if not force_refresh and key in cache:
         return cache[key]
@@ -48,36 +50,53 @@ def get_weather(
     try:
         resp = requests.get(url, timeout=10)
         data = resp.json()
-        if "error" in data and data["error"]:
+        if data.get("error"):
             print(f"API error for {date_str}: {data.get('reason', 'Unknown error')}")
-            result = {'weather_code': 1, 'temperature': 15.0, 'precipitation': 0, 'wind_speed': 5, 'humidity': 65}
+            result = {
+                "weather_code": 1,
+                "temperature": 15.0,
+                "precipitation": 0,
+                "wind_speed": 5,
+                "humidity": 65,
+            }
         else:
             daily = data.get("daily", {})
+
             def safe_get(arr, idx=0, default=0.0):
                 return arr[idx] if arr and arr[idx] is not None else default
-            
+
             result = {
-                'weather_code': int(safe_get(daily.get('weathercode', []), 0, 0)),
-                'temperature': (safe_get(daily.get('temperature_2m_max', [])) + 
-                                safe_get(daily.get('temperature_2m_min', []))) / 2,
-                'precipitation': safe_get(daily.get('precipitation_sum', [])),
-                'wind_speed': safe_get(daily.get('windspeed_10m_max', [])),
-                'humidity': safe_get(daily.get('relative_humidity_2m_mean', []))
+                "weather_code": int(safe_get(daily.get("weathercode", []), 0, 0)),
+                "temperature": (
+                    safe_get(daily.get("temperature_2m_max", []))
+                    + safe_get(daily.get("temperature_2m_min", []))
+                )
+                / 2,
+                "precipitation": safe_get(daily.get("precipitation_sum", [])),
+                "wind_speed": safe_get(daily.get("windspeed_10m_max", [])),
+                "humidity": safe_get(daily.get("relative_humidity_2m_mean", [])),
             }
         cache[key] = result
-        _save_cache(cache)
+        save_cache(cache)
         return result
-    except Exception as e:
+    except (requests.RequestException, ValueError, KeyError) as e:
         print(f"获取 {date_str} 天气失败: {e}")
-        return {'weather_code': 1, 'temperature': 15.0, 'precipitation': 0, 'wind_speed': 5, 'humidity': 65}
+        return {
+            "weather_code": 1,
+            "temperature": 15.0,
+            "precipitation": 0,
+            "wind_speed": 5,
+            "humidity": 65,
+        }
 
-def _load_cache() -> dict:
+
+def load_cache() -> dict:
     if CACHE_FILE.exists():
         with open(CACHE_FILE, "r") as f:
             return json.load(f)
     return {}
 
-def _save_cache(cache: dict):
+def save_cache(cache: dict):
     CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(CACHE_FILE, "w") as f:
         json.dump(cache, f, indent=2)
