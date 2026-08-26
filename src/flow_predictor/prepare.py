@@ -11,6 +11,8 @@ BASE_FEATURES = [
     "weekday",
     "month",
     "day_of_year",
+    "is_workday",
+    "is_holiday",
     "weather_code",
     "category_code",
 ]
@@ -19,11 +21,17 @@ NUMERIC_FEATURES = BASE_FEATURES[:-2]  # 排除两个 *_code 编码列
 
 
 def add_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
-    """添加 weekday/month/day_of_year 日历特征。"""
+    """添加日历特征：weekday/month/day_of_year + 法定节假日/调休。"""
     df = df.copy()
     df["weekday"] = df["date"].dt.weekday
     df["month"] = df["date"].dt.month
     df["day_of_year"] = df["date"].dt.dayofyear
+
+    # chinese_calendar 的 is_workday 已包含调休逻辑：调休上班的周末返回 True
+    import chinese_calendar as cn_cal
+    dates = df["date"].dt.date
+    df["is_workday"] = [int(cn_cal.is_workday(d)) for d in dates]
+    df["is_holiday"] = [int(not cn_cal.is_workday(d)) for d in dates]
     return df
 
 

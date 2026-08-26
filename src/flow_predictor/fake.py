@@ -3,9 +3,9 @@ import pandas as pd
 
 
 def fake_all():
-    # 模拟10年
+    # 模拟10年（chinese_calendar 数据只覆盖到 2026）
     start_date = "2016-01-01"
-    end_date = pd.date_range(start=start_date, periods=36500, freq="D")[-1]
+    end_date = "2026-08-01"
     dates = pd.date_range(start=start_date, end=end_date, freq="D")
 
     # 生成5家店铺，店铺属性信息是固定的
@@ -38,8 +38,11 @@ def fake_all():
     base_temp = 15 + 25 * np.sin(2 * np.pi * (day_of_year - 80) / 365)
     df["temperature"] = base_temp + np.random.normal(0, 3, size=len(df))
 
-    # 周末，节假日，后续放到特征工程里
+    # 周末，节假日，调休（chinese_calendar：is_workday 对调休上班的周末返回 True）
+    import chinese_calendar as cn_cal
+    df["is_workday"] = [int(cn_cal.is_workday(d.date())) for d in df["date"]]
     df["is_weekend"] = df["date"].dt.weekday.isin([5, 6]).astype(int)
+    df["is_holiday"] = [int(not cn_cal.is_workday(d.date())) for d in df["date"]]
 
     # 生成假的客流，基于一些假设的关系
     # 面积越大、位置越好，客流越大
@@ -49,8 +52,8 @@ def fake_all():
     # 温度，太冷太热不行
     temp_factor = 1 - 0.004 * (df["temperature"] - 20) ** 2
     temp_factor = temp_factor.clip(0.4, 1.0)
-    # 周末人多
-    weekend_factor = 1 + 0.3 * df["is_weekend"]
+    # 周末人多，法定假日更多；调休上班的周末接近工作日
+    weekend_factor = 1 + 0.3 * df["is_weekend"] + 0.25 * df["is_holiday"] - 0.15 * ((df["is_weekend"] == 1) & (df["is_workday"] == 1)).astype(int)
     # 加点随机波动
     noise = np.random.normal(1, 0.12, len(df))
     df["passby_visit"] = (
