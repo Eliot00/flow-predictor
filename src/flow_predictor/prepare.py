@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
+
+# 固定品类映射：新增品类需在此登记，否则训练/预测直接报错
+CATEGORY_MAP = {"化妆品": 0, "手表": 1, "服装": 2}
 
 BASE_FEATURES = [
     "area",
@@ -38,16 +41,23 @@ def add_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def encode_category(df: pd.DataFrame) -> pd.Series:
+    """按 CATEGORY_MAP 编码 category，未知品类直接报错。"""
+    unknown = set(df["category"].unique()) - set(CATEGORY_MAP)
+    if unknown:
+        raise ValueError(f"category 不在 CATEGORY_MAP 中: {sorted(unknown)}")
+    return df["category"].map(CATEGORY_MAP)
+
+
 def add_time_and_encode_features(df: pd.DataFrame) -> pd.DataFrame:
-    """添加日历特征，并对 category 做 LabelEncoder 编码。
+    """添加日历特征，并对 category 做固定映射编码。
 
     weather_code是WMO标准天气代码
     """
     df = add_calendar_features(df)
 
     # TODO: 这块可能有多tags
-    le_category = LabelEncoder()
-    df["category_code"] = le_category.fit_transform(df["category"])
+    df["category_code"] = encode_category(df)
     return df
 
 

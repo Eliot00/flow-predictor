@@ -10,12 +10,12 @@ import torch
 import typer
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.preprocessing import LabelEncoder
 
 from flow_predictor.fake import fake_all
 from flow_predictor.network import MLP, LSTMModel, train_torch_model
 from flow_predictor.prepare import (
     add_calendar_features,
+    encode_category,
     prepare_data,
     prepare_lstm_data,
     transform_targets,
@@ -143,7 +143,8 @@ def train(
                     "input_dim": input_dim,
                     "hidden_size": hidden_size,
                     "output_dim": output_dim,
-                    "feature_scaler": scaler,
+                    "feature_mean": scaler.mean_.tolist(),
+                    "feature_scale": scaler.scale_.tolist(),
                     "feature_names": features,
                     "target_names": TARGET_COLS,
                     "model_type": "mlp",
@@ -186,10 +187,7 @@ def train(
                 )
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # TODO: 标签数据需要一个统一的编码器
-            le_category = LabelEncoder()
-            le_category.fit(df["category"])
-
+            # 品类用固定的 CATEGORY_MAP 编码，无需往 checkpoint 里存类别
             torch.save(
                 {
                     "model_state_dict": net.state_dict(),
@@ -197,10 +195,10 @@ def train(
                     "hidden_size": hidden_size,
                     "num_layers": 2,
                     "output_size": output_size,
-                    "feature_scaler": scaler,
+                    "feature_mean": scaler.mean_.tolist(),
+                    "feature_scale": scaler.scale_.tolist(),
                     "feature_names": features,
                     "target_names": TARGET_COLS,
-                    "category_classes": sorted(df["category"].unique().tolist()),
                     "model_type": "lstm",
                 },
                 save_path,
@@ -215,16 +213,13 @@ def predict(
     model_file: Annotated[Path, typer.Option(help="Saved model file")],
     data_file: Annotated[Path, typer.Option(help="Stores, dates, features CSV file")],
 ):
-    checkpoint = torch.load(model_file, map_location="cpu", weights_only=False)
+    checkpoint = torch.load(model_file, map_location="cpu")
     df = pd.read_csv(data_file, parse_dates=["date"])
     df = df.sort_values(["sid", "date"]).reset_index(drop=True)
 
     df = add_calendar_features(df)
 
-    # 用训练时的类别集合做 LabelEncoder，保证训练/预测一致
-    le = LabelEncoder()
-    le.classes_ = np.array(checkpoint["category_classes"])
-    df["category_code"] = le.transform(df["category"])
+    df["category_code"] = encode_category(df)
 
     for idx, row in df.iterrows():
         weather = get_weather(
@@ -261,11 +256,13 @@ def predict(
             "Not enough data to form sequences. Need at least seq_len rows per store."
         )
 
-    # 标准化
-    feature_scaler = checkpoint["feature_scaler"]
+    # 标准化：用训练时保存的 mean/scale 手动还原 StandardScaler.transform
+    feature_mean = np.array(checkpoint["feature_mean"])
+    feature_scale = np.array(checkpoint["feature_scale"])
+    feature_scale[feature_scale == 0] = 1.0
     n_samples, seq_len_, n_feats = X_raw.shape
     X_flat = X_raw.reshape(-1, n_feats)
-    X_flat_scaled = feature_scaler.transform(X_flat)
+    X_flat_scaled = (X_flat - feature_mean) / feature_scale
     X_scaled = X_flat_scaled.reshape(n_samples, seq_len_, n_feats)
 
     input_size = checkpoint["input_size"]
