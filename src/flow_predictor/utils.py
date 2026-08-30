@@ -96,6 +96,7 @@ def load_cache() -> dict:
             return json.load(f)
     return {}
 
+
 def save_cache(cache: dict):
     CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(CACHE_FILE, "w") as f:

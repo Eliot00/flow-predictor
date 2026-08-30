@@ -1,26 +1,5 @@
-from collections.abc import Sequence
-
-import numpy as np
-import torch
-from sklearn.metrics import mean_squared_error, r2_score
+import lightning as L
 from torch import nn, optim
-from torch.utils.data import DataLoader, TensorDataset
-
-
-class MLP(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int, hidden_size: int = 64):
-        super().__init__()
-        h2 = max(1, hidden_size // 2)
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_size),
-            nn.ReLU(),
-            nn.Linear(64, h2),
-            nn.ReLU(),
-            nn.Linear(32, output_dim),
-        )
-
-    def forward(self, x):
-        return self.net(x)
 
 
 class LSTMModel(nn.Module):
@@ -43,66 +22,41 @@ class LSTMModel(nn.Module):
         return self.fc(last_out)  # (batch, output_size)
 
 
-def train_torch_model(
-    net: nn.Module,
-    X_train: torch.Tensor,
-    y_train: torch.Tensor,
-    X_test: torch.Tensor,
-    y_test: torch.Tensor,
-    epochs: int = 50,
-    lr: float = 0.001,
-    batch_size: int = 32,
-    weight_decay: float = 1e-4,
-    grad_clip: float | None = 1.0,
-    target_names: Sequence[str] | None = None,
-    verbose: bool = True,
-) -> nn.Module:
-    """Train a torch regressor on log1p-transformed targets.
+class LtModule(L.LightningModule):
+    def __init__(
+        self,
+        net: nn.Module,
+        lr: float = 1e-3,
+        weight_decay: float = 1e-4,
+        meta: dict | None = None,
+    ):
+        super().__init__()
+        self.save_hyperparameters(ignore=["net"])
+        self.net = net
+        self.criterion = nn.MSELoss()
 
-    ``y_train`` and ``y_test`` are in log1p space; losses are optimized there
-    while the reported metrics are converted back to original units via expm1.
-    """
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
-    loader = DataLoader(
-        TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True
-    )
-    for epoch in range(epochs):
-        net.train()
-        total_loss = 0.0
-        for X_batch, y_batch in loader:
-            optimizer.zero_grad()
-            pred = net(X_batch)
-            loss = criterion(pred, y_batch)
-            loss.backward()
-            if grad_clip is not None:
-                torch.nn.utils.clip_grad_norm_(net.parameters(), grad_clip)
-            optimizer.step()
-            total_loss += loss.item()
-        if verbose and (epoch + 1) % 10 == 0:
-            net.eval()
-            with torch.no_grad():
-                train_loss = total_loss / len(loader)
-                test_pred = net(X_test)
-                test_loss = criterion(test_pred, y_test).item()
+    def forward(self, x):
+        return self.net(x)
 
-                y_true_np = np.expm1(y_test.cpu().numpy())
-                y_pred_np = np.expm1(test_pred.cpu().numpy())
+    def training_step(self, batch, batch_idx):
+        X, y = batch
+        loss = self.criterion(self.net(X), y)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss
 
-                target_mse = mean_squared_error(
-                    y_true_np, y_pred_np, multioutput="raw_values"
-                )
-                target_r2 = r2_score(y_true_np, y_pred_np, multioutput="raw_values")
-                names = target_names or [f"target_{i}" for i in range(len(target_r2))]
-                details = " | ".join(
-                    f"{name}: MSE={mse:.2f}, R²={r2:.3f}"
-                    for name, mse, r2 in zip(names, target_mse, target_r2)
-                )
-                print(
-                    f"Epoch {epoch + 1}/{epochs} - "
-                    f"Train Loss (scaled): {train_loss:.4f}, "
-                    f"Test Loss (scaled): {test_loss:.4f}, "
-                    f"Test R² (mean): {target_r2.mean():.4f}\n  {details}"
-                )
-            net.train()
-    return net
+    def validation_step(self, batch, batch_idx):
+        X, y = batch
+        loss = self.criterion(self.net(X), y)
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True)
+
+    def test_step(self, batch, batch_idx):
+        X, y = batch
+        loss = self.criterion(self.net(X), y)
+        self.log("test_loss", loss)
+
+    def configure_optimizers(self):
+        return optim.Adam(
+            self.net.parameters(),
+            lr=self.hparams.lr,
+            weight_decay=self.hparams.weight_decay,
+        )
